@@ -42,7 +42,7 @@ In an elevated Command prompt, call the following command:
 
 
 Notes-
- - Azure Function EventGrid triggers using package: Microsoft.Azure.WebJobs.Extensions.EventGrid 2.1.0)
+ - Azure Function EventGrid triggers using package: Microsoft.Azure.WebJobs.Extensions.EventGrid 2.1.0
 
 
 
