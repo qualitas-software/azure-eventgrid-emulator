@@ -1,0 +1,13 @@
+﻿{
+  "profiles": {
+    "Qs.EventGrid.Emulator": {
+      "commandName": "Project",
+      "dotnetRunMessages": "true",
+      "launchBrowser": false,
+      "environmentVariables": {
+        //"ASPNETCORE_URLS": "https://localhost:5005",
+        //"ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}
