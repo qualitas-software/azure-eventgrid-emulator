@@ -21,9 +21,13 @@ Events can be published (using package: Microsoft.Azure.EventGrid 3.2.0) as foll
     var @event = new EventGridEvent(<id>, <subject>, ...  );
     await topic.PublishEventsAsync(uri.Host, new [] { @event });  
     
-Events will be pushed to Azure Function or webhook running on localhost port 7075 * 
+Events will be pushed to Azure Function or webhook running on localhost port 7075 as follows: * 
+
+    http://localhost:7075/runtime/webhooks/eventGrid?functionName={subscriberFunctionName}
 
 Amend the filtering logic in EventProcessor.cs, which currently filters based on three supported EventTypes.
+
+\* - By default, but can be adjusted in code.
 
 
 ## Setup Proxy & DNS Host Mapping
@@ -38,7 +42,7 @@ In an elevated Command prompt, call the following command:
 
 
 Notes-
-Azure Function EventGrid triggers using package: Microsoft.Azure.WebJobs.Extensions.EventGrid 2.1.0)
+ - Azure Function EventGrid triggers using package: Microsoft.Azure.WebJobs.Extensions.EventGrid 2.1.0)
 
 
-\* - By default, but can be adjusted in code.
+
