@@ -7,8 +7,8 @@
 Handles Azure Event Grid Events in a development/localhost context, without requiring an internet connection or an instance of Azure Event Grid.  This allows disconnected and isolated development use of Event Grid in one or more local running Visual Studio (or VS Code) solutions.
 
 <sub>_Disclaimers_</sub>
-<br/><sub>- This is about the art of the possible, and I readily ackowledge it could be made more flexible.</sub>
-<br/><sub>- These notes are for developing on Windows, but concepts can be extended for other environments.</sub>
+<br/><sub>- This is about the art of the possible, and with time it could be made more flexible.</sub>
+<br/><sub>- These notes are for developing on Windows, but the concepts can be applied to other environments.</sub>
 <br/>
     
 
