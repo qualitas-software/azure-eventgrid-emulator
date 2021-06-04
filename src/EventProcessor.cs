@@ -17,10 +17,11 @@ namespace Qs.EventGrid.Emulator
         {
             ctor.logger.LogDebug($"EventProcessor is starting.");
             cancel.Register(() => ctor.logger.LogDebug($"EventProcessor background task is stopping."));
+            var errors = 0;
 
             while (!cancel.IsCancellationRequested)
             {
-                EventGridEvent @event = null; string id = null; var errors = 0;
+                EventGridEvent @event = null; string id = null;
 
                 try
                 {
@@ -50,11 +51,12 @@ namespace Qs.EventGrid.Emulator
                     });
 
                     ctor.logger.LogInformation($"Event pushed {@event.Id} {@event.EventType} {@event.Subject}");
+                    errors = 0;
                 }
                 catch (HttpRequestException ex)
                 {
                     ctor.logger.LogWarning("EventProcessor : {error} [{id}/{errors}]. Event delivery will be reattempted.", ex.Message, id, errors);
-                    await Task.Run(async () => { await Task.Delay(60 * 1000, cancel); if (!cancel.IsCancellationRequested) Queue.Enqueue(@event); }, cancel);
+                    var q = Task.Run(async () => { await Task.Delay(60 * 1000, cancel); if (!cancel.IsCancellationRequested) Queue.Enqueue(@event); }, cancel);
                     await Task.Delay(1000 * (int)Math.Pow(3, errors++), cancel);
                 }
                 catch (Exception ex)
