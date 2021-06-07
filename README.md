@@ -57,6 +57,8 @@ In an elevated Command prompt, call the following command:
 
     netsh interface portproxy add v4tov4 listenport=443 listenaddress=127.0.0.183 connectport=5005 connectaddress=127.0.0.1
 
+Install `certificate.pfx` from the Emulators project folder, with password "123", to: Current User\Trusted Root Certification Authorities.
+
 
 ## Sample Azure Functions Endpoint
 
