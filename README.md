@@ -49,7 +49,7 @@ Amend the filtering logic in EventProcessor.cs, which currently filters based on
 
 ## Setup Proxy & DNS Host Mapping
 
-Add the following entry to the C:\Windows\System32\drivers\etc\hosts file:
+In an elevated context, add the following entry to the `C:\Windows\System32\drivers\etc\hosts` file:
 
     127.0.0.183 local.eventgrid.net
 
