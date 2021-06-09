@@ -69,7 +69,7 @@ namespace Qs.EventGrid.Emulator
             ctor.logger.LogDebug($"EventProcessor background task is finished.");
         }
 
-        public EventProcessor(IEventGridClient subscriber, ILogger<EventProcessor> logger)
+        public EventProcessor(IEventGridClient subscriber, ILogger<EventProcessor> logger) //todo: support >1 destination app via the client
             => ctor = (subscriber, logger);
         readonly (IEventGridClient subscriber, ILogger<EventProcessor> logger) ctor;
     }
