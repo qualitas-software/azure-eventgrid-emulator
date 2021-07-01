@@ -44,7 +44,7 @@ Events will be pushed to Azure Function or webhook running on localhost port 707
 
 Amend the filtering logic in EventProcessor.cs, which currently filters based on three supported EventTypes.
 
-\* - _By default, but can be adjusted in code._
+<sub>\* - _By default, but can be adjusted in code._</sub>
 
 
 ## Setup Proxy & DNS Host Mapping
@@ -64,7 +64,9 @@ Install `certificate.pfx` from the Emulators project folder, with password "123"
 
 The emulator pushes the events to the Azure Functions endpoints over http when running _locally_, which is the normal setup for Azure Functions Core Tools.  Azure Event Grid will always push to Azure deployed function app endpoints using https.  
 
-You will need to ensure _this_ function app is running on port 7075, or adjust the port the emulator tries to write http events to.
+You will need to ensure _this_ function app is running on port 7075, or adjust the port the emulator tries to write http events to.  
+    
+_Tip - You can set the port from the function app's context menu by selecting `Properties | Debug | Application Arguments` and entering the following command arguments: `host start --port 7075`_
 
 Setup your C# endpoint function using EventGridTriggerAttribute as follows:
 
