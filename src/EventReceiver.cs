@@ -9,26 +9,28 @@ using System.Threading.Tasks;
 namespace Qs.EventGrid.Emulator
 {
     using static Constants;
+    using static JsonHelpers;
 
     class EventReceiver
     {
         public async Task ReceiveAsync(HttpContext context)
         {
-            context.Response.StatusCode = 200;
             context.Response.Headers.Add("App", Namespace);
 
             try
             {
-                var json = await context.Request.ReadFromJsonAsync<JsonDocument>();
+                var json = await context.Request.ReadFromJsonAsync<JsonDocument>(JsonSerializerOptions);
 
                 try
                 {
                     var @events = json.FromJson<List<EventGridEvent>>();
                     foreach (var @event in events)
                     {
-                        EventProcessor.Queue.Enqueue(@event);
+                        EventProcessor.Queue.Enqueue((@event, 1));
                         logger.LogDebug($"Event published {@event.Id} {@event.EventType} {@event.Subject}");
                     }
+
+                    context.Response.StatusCode = 200;
                 }
                 catch (Exception ex)
                 {

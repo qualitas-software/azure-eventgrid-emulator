@@ -11,21 +11,23 @@ namespace Qs.EventGrid.Emulator
 {
     class EventProcessor : BackgroundService
     {
-        public static Queue<EventGridEvent> Queue = new();
+        public static Queue<(EventGridEvent, int)> Queue = new();
 
         protected override async Task ExecuteAsync(CancellationToken cancel)
         {
-            ctor.logger.LogDebug($"EventProcessor is starting.");
-            cancel.Register(() => ctor.logger.LogDebug($"EventProcessor background task is stopping."));
-            var errors = 0;
+            var (subscriber, logger) = ctor;
+            logger.LogDebug($"EventProcessor is starting.");
+            cancel.Register(() => logger.LogDebug($"EventProcessor background task is stopping."));
+            var errorCt = 0;
 
             while (!cancel.IsCancellationRequested)
             {
-                EventGridEvent @event = null; string id = null;
+                (EventGridEvent @event, int attempt) item = (null, -1); string id = null;
+                logger.LogTrace("Looking for events ({errors})", errorCt);
 
                 try
                 {
-                    if (Queue.TryDequeue(out @event)) id = @event.Id;
+                    if (Queue.TryDequeue(out item)) id = item.@event.Id;
                     else
                     {
                         await Task.Delay(1000, cancel);
@@ -34,42 +36,58 @@ namespace Qs.EventGrid.Emulator
                 }
                 catch (Exception ex)
                 {
-                    ctor.logger.LogError(ex, "EventProcessor : Failed to dequeue event [{id}/{errors}].", id, errors);
-                    await Task.Delay(1000 * (int)Math.Pow(3, errors++), cancel);
+                    logger.LogError(ex, "Failed to dequeue event [{id}/{errors}].", id, errorCt);
+                    await Task.Delay(1000 * (int)Math.Pow(3, errorCt++), cancel);
                     continue;
                 }
 
                 try
                 {
                     // Push the event to the correct local endpoint (eg- Azure Function name)  //todo: make mapping config driven
-                    await (@event.EventType switch
+                    await (item.@event.EventType switch
                     {
-                        nameof(EventTypes.CreateRequest) => ctor.subscriber.SendEventAsync("CreateEventHandler", @event),
-                        nameof(EventTypes.UpdateRequest) => ctor.subscriber.SendEventAsync("UpdateEventHandler", @event),
-                        nameof(EventTypes.Progress) => ctor.subscriber.SendEventAsync("ProgressEventHandler", @event),
-                        _ => throw new ArgumentException($"Event type '{@event.EventType}' not supported.")
+                        nameof(EventTypes.CreateRequest) => subscriber.SendEventAsync("CreateEventHandler", item.@event),
+                        nameof(EventTypes.UpdateRequest) => subscriber.SendEventAsync("UpdateEventHandler", item.@event),
+                        nameof(EventTypes.Progress) => subscriber.SendEventAsync("ProgressEventHandler", item.@event),
+                        _ => throw new ArgumentException($"Event type '{item.@event.EventType}' not supported.")
                     });
 
-                    ctor.logger.LogInformation($"Event pushed {@event.Id} {@event.EventType} {@event.Subject}");
-                    errors = 0;
+                    logger.LogInformation($"Event pushed {item.@event.Id}/{item.attempt} {item.@event.EventType} {item.@event.Subject}");
+                    errorCt = 0;
                 }
                 catch (HttpRequestException ex)
                 {
-                    ctor.logger.LogWarning("EventProcessor : {error} [{id}/{errors}]. Event delivery will be reattempted.", ex.Message, id, errors);
-                    var q = Task.Run(async () => { await Task.Delay(60 * 1000, cancel); if (!cancel.IsCancellationRequested) Queue.Enqueue(@event); }, cancel);
-                    await Task.Delay(1000 * (int)Math.Pow(3, errors++), cancel);
+                    if (item.attempt >= 5)
+                    {
+                        logger.LogWarning("Error({errorCt}): {error}. Event {id}/{attempt} deadlettered:\n{event}", errorCt, ex.Message, id, item.attempt, item.@event.ToJson());
+                        continue;
+                    }
+
+                    logger.LogInformation("Error({errorCt}): {error}. Event delivery for {id}/{attempt} will be reattempted.", errorCt, ex.Message, id, item.attempt);
+                    var q = Task.Run(async () =>
+                    {
+                        await Task.Delay(delayMs(2 + item.attempt), cancel);
+                        if (cancel.IsCancellationRequested) return;
+                        Queue.Enqueue((item.@event, item.attempt + 1));
+                        logger.LogDebug("Event {id}/{attempt} requeued.", id, item.attempt + 1);
+                    }, cancel).ConfigureAwait(false);
+
+                    logger.LogDebug("Sleep after error starting for {delay}ms.", delayMs(errorCt));
+                    await Task.Delay(delayMs(errorCt++), cancel);
                 }
                 catch (Exception ex)
                 {
-                    ctor.logger.LogError(ex, "EventProcessor [{id}/{errors}]. Event dropped:\n{Event}", id, errors, @event.ToJson());
-                    await Task.Delay(1000 * (int)Math.Pow(3, errors++), cancel);
+                    logger.LogError(ex, "Error({errors}): Event processing failed. Event dropped:\n{Event}", errorCt, item.@event.ToJson());
+                    await Task.Delay(delayMs(errorCt++), cancel);
                 }
+
+                static int delayMs(int number) => ((int)Math.Pow(2, number > 7 ? 7 : number)) * 1000; // number->secs : 1->2s, 2->4s, 3->8s, 4->16s, 5->32s, 6->64s, 7->128s
             }
 
-            ctor.logger.LogDebug($"EventProcessor background task is finished.");
+            logger.LogInformation($"EventProcessor background task has finished.");
         }
 
-        public EventProcessor(IEventGridClient subscriber, ILogger<EventProcessor> logger) //todo: support >1 destination app via the client
+        public EventProcessor(IEventGridClient subscriber, ILogger<EventProcessor> logger)
             => ctor = (subscriber, logger);
         readonly (IEventGridClient subscriber, ILogger<EventProcessor> logger) ctor;
     }

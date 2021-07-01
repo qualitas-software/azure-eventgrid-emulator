@@ -22,15 +22,15 @@ namespace Qs.EventGrid.Emulator
 
         /// <summary>Get a JsonDocument for the object.</summary>
         public static JsonDocument ToJsonDocument(this object @object)
-            => JsonDocument.Parse(JsonSerializer.Serialize(@object, jsonSerializerOptions));
+            => JsonDocument.Parse(JsonSerializer.Serialize(@object, JsonSerializerOptions));
 
         /// <summary>Get a json (string) for the object.</summary>
         public static string ToJson(this object @object)
-            => JsonSerializer.Serialize(@object, jsonSerializerOptions);
+            => JsonSerializer.Serialize(@object, JsonSerializerOptions);
 
         /// <summary>Get an object from the json string.</summary>
         public static T FromJson<T>(this string @string)
-         => JsonSerializer.Deserialize<T>(@string, jsonSerializerOptions);
+         => JsonSerializer.Deserialize<T>(@string, JsonSerializerOptions);
 
         /// <summary>Get an object from the json document.</summary>
         public static T FromJson<T>(this JsonDocument document)
@@ -38,9 +38,10 @@ namespace Qs.EventGrid.Emulator
 
         /// <summary>Get an object from the json element.</summary>
         public static T FromJson<T>(this JsonElement element)
-         => JsonSerializer.Deserialize<T>(element.ToString(), jsonSerializerOptions);
+         => JsonSerializer.Deserialize<T>(element.ToString(), JsonSerializerOptions);
 
-        readonly static JsonSerializerOptions jsonSerializerOptions = new()
+        /// <summary>Default options for System.Text.Json serialisation.</summary>
+        public readonly static JsonSerializerOptions JsonSerializerOptions = new()
         {
             PropertyNameCaseInsensitive = true,
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
