@@ -70,7 +70,7 @@ Setup your C# endpoint function using EventGridTriggerAttribute as follows:
 
     public class EventHandlerFunctions
     {
-        [Function(nameof(CreateEventHandler))]
+        [FunctionName(nameof(CreateEventHandler))]
         public async Task CreateEventHandler([EventGridTrigger] EventGridEvent @event, ... )
         {
             ...
