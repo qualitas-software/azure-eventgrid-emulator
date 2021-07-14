@@ -38,7 +38,7 @@ Events can be published, from a different VS solution, (using package: Microsoft
     var @event = new EventGridEvent(<id>, <subject>, ...  );
     await topic.PublishEventsAsync(uri.Host, new [] { @event });  
     
-Events will be pushed to Azure Function or webhook running on localhost port 7075* as follows:
+Events will be pushed to an Azure Function or a webhook running on localhost port 7075* as follows:
 
     http://localhost:7075/runtime/webhooks/eventGrid?functionName={subscriberFunctionName}
 
