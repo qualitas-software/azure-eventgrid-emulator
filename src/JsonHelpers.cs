@@ -30,15 +30,15 @@ namespace Qs.EventGrid.Emulator
 
         /// <summary>Get an object from the json string.</summary>
         public static T FromJson<T>(this string @string)
-         => JsonSerializer.Deserialize<T>(@string, JsonSerializerOptions);
+            => JsonSerializer.Deserialize<T>(@string, JsonSerializerOptions);
 
         /// <summary>Get an object from the json document.</summary>
         public static T FromJson<T>(this JsonDocument document)
-         => document.RootElement.FromJson<T>();
+            => document.RootElement.FromJson<T>();
 
         /// <summary>Get an object from the json element.</summary>
         public static T FromJson<T>(this JsonElement element)
-         => JsonSerializer.Deserialize<T>(element.ToString(), JsonSerializerOptions);
+            => JsonSerializer.Deserialize<T>(element.ToString(), JsonSerializerOptions);
 
         /// <summary>Default options for System.Text.Json serialisation.</summary>
         public readonly static JsonSerializerOptions JsonSerializerOptions = new()
