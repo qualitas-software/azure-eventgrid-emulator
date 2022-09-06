@@ -1,29 +1,29 @@
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Routing;
-using Microsoft.Extensions.DependencyInjection;
+namespace Qs.EventGrid.Emulator;
 
-namespace Qs.EventGrid.Emulator
+using static Constants;
+
+public class Startup
 {
-    using static Constants;
+    public void ConfigureServices(IServiceCollection services)
+        => services.AddHostedService<EventProcessor>()
+                   .AddSingleton<EventReceiver>()
+                   .AddOptions<Services>()
+                   .AddEventGridClients(configuration);
 
-    public class Startup
+    public void Configure(IApplicationBuilder app, IWebHostEnvironment _)
+        => app.UseHttpsRedirection()
+              .UseRouting()
+              .UseEndpoints(ConfigureEndpoints);
+
+    void ConfigureEndpoints(IEndpointRouteBuilder e)
     {
-        public void ConfigureServices(IServiceCollection services)
-            => services.AddHostedService<EventProcessor>()
-                       .AddSingleton<EventReceiver>()
-                       .AddHttpClient<IEventGridClient, EventGridClient>();
+        e.MapGet("/", async ctx => await ctx.Response.WriteAsJsonAsync(new { App = Namespace }));
+        var b = e.MapPost(EventGridReceiverPath, e.ServiceProvider.GetRequiredService<EventReceiver>().ReceiveAsync);
 
-        public void Configure(IApplicationBuilder app, IWebHostEnvironment _)
-            => app.UseHttpsRedirection()
-                  .UseRouting()
-                  .UseEndpoints(ConfigureEndpoints);
-
-        void ConfigureEndpoints(IEndpointRouteBuilder e)
-        {
-            e.MapGet("/", async ctx => await ctx.Response.WriteAsJsonAsync(new { App = Namespace }));
-            e.MapPost("/api/events", e.ServiceProvider.GetRequiredService<EventReceiver>().ReceiveAsync);
-        }
+        var endpoint = $"{configuration["Kestrel:EndPoints:Https:Url"]?.EnsureTrailing("/")}{EventGridReceiverPath.TrimStart('/')}";
+        e.ServiceProvider.GetLogger<Startup>().LogInformation("Post events to {EventEndpoint}", endpoint);
     }
+
+    public Startup(IConfiguration configuration) => this.configuration = configuration;
+    readonly IConfiguration configuration;
 }

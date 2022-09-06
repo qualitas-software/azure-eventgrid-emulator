@@ -1,102 +1,91 @@
-﻿using Microsoft.Azure.EventGrid.Models;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
-using System.Net.Http;
+﻿using Azure.Messaging.EventGrid;
+using Microsoft.Extensions.Options;
 using System.Runtime.CompilerServices;
-using System.Threading;
-using System.Threading.Tasks;
 
-namespace Qs.EventGrid.Emulator
+namespace Qs.EventGrid.Emulator;
+
+class EventProcessor : BackgroundService
 {
-    class EventProcessor : BackgroundService
+    public static Queue<(EventGridEvent, Subscription, int)> Events = new();
+
+    protected override async Task ExecuteAsync(CancellationToken cancel)
     {
-        public static Queue<(EventGridEvent, int)> Queue = new();
+        var (eventTypeMap, eventGridClient, logger) = ctor;
+        logger.LogDebug($"EventProcessor is starting.");
+        cancel.Register(() => logger.LogDebug($"EventProcessor background task is stopping."));
+        var errorCt = 0;
 
-        protected override async Task ExecuteAsync(CancellationToken cancel)
+        while (!cancel.IsCancellationRequested)
         {
-            var (subscriber, logger) = ctor;
-            logger.LogDebug($"EventProcessor is starting.");
-            cancel.Register(() => logger.LogDebug($"EventProcessor background task is stopping."));
-            var errorCt = 0;
+            (EventGridEvent @Event, Subscription Subscription, int Attempt) item = (null, null, -1);
+            string id = null, type = null;
 
-            while (!cancel.IsCancellationRequested)
+            logger.LogTrace("Looking for events ({Errors})", errorCt);
+
+            try
             {
-                (EventGridEvent @event, int attempt) item = (null, -1); string id = null;
-                logger.LogTrace("Looking for events ({Errors})", errorCt);
-
-                try
+                if (!Events.TryDequeue(out item))
                 {
-                    if (Queue.TryDequeue(out item)) id = item.@event.Id;
-                    else
-                    {
-                        await Task.Delay(1000, cancel);
-                        continue;
-                    }
+                    await Task.Delay(500, cancel);
+                    continue;
                 }
-                catch (Exception ex)
+                (id, type) = (item.Event.Id, item.Event.EventType);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error({ErrorCt}): Failed to dequeue event.", errorCt);
+                await ExponentialBackOff();
+                continue;
+            }
+
+            try
+            {
+                // Get correct client & push the event to the correct endpoint (eg- WebHook or Azure Function)
+                var endpoint = await eventGridClient.SendEventAsync(item.Subscription.Service.BaseAddress, item.Subscription.Endpoint, item.Event);
+
+                logger.LogInformation("Event pushed {Id}/{Attempt} {EventType} {Subject} to {Subscription}", id, item.Attempt, type, item.Event.Subject, item.Subscription);
+                errorCt = 0;
+            }
+            catch (HttpRequestException ex)
+            {
+                if (item.Attempt >= 5)
                 {
-                    logger.LogError(ex, "Error({ErrorCt}): Failed to dequeue event.", errorCt);
-                    await ExponentialBackOff();
+                    //todo: use a DLQ (short TTL, eg- 24h)? eg- az storage emulator
+                    logger.LogWarning("Error({ErrorCt}): {Error}. Event {Id}/{Attempt} deadlettered (to log) for {Subscription} :\n{Event}", errorCt, ex.Message, id, item.Attempt, item.Subscription, item.Event.ToJson());
                     continue;
                 }
 
-                try
-                {
-                    // Push the event to the correct local endpoint (eg- Azure Function name)  //todo: make mapping config driven
-                    await (item.@event.EventType switch
-                    {
-                        nameof(EventTypes.CreateRequest) => subscriber.SendEventAsync("CreateEventHandler", item.@event),
-                        nameof(EventTypes.UpdateRequest) => subscriber.SendEventAsync("UpdateEventHandler", item.@event),
-                        nameof(EventTypes.Progress) => subscriber.SendEventAsync("ProgressEventHandler", item.@event),
-                        _ => throw new ArgumentException($"Event type '{item.@event.EventType}' not supported.")
-                    });
+                logger.LogInformation("Error({ErrorCt}): {Error}. Event delivery for {Id}/{Attempt} will be reattempted for {Subscription}.", errorCt, ex.Message, id, item.Attempt, item.Subscription);
+                var _ = Task.Run(DelayedRequeue, cancel).ConfigureAwait(false); // run on thread pool
 
-                    logger.LogInformation("Event pushed {Id}/{Attempt} {EventType} {Subject}", id, item.attempt, item.@event.EventType, item.@event.Subject);
-                    errorCt = 0;
-                }
-                catch (HttpRequestException ex)
+                async Task DelayedRequeue()
                 {
-                    if (item.attempt >= 5)
-                    {
-                        //todo: use a DLQ (short TTL, eg- 24h)? eg- az storage emulator
-                        logger.LogWarning("Error({ErrorCt}): {Error}. Event {Id}/{Attempt} deadlettered (to log):\n{Event}", errorCt, ex.Message, id, item.attempt, item.@event.ToJson());
-                        continue;
-                    }
-
-                    logger.LogInformation("Error({ErrorCt}): {Error}. Event delivery for {Id}/{Attempt} will be reattempted.", errorCt, ex.Message, id, item.attempt);
-                    var q = Task.Run(DelayedRequeue, cancel).ConfigureAwait(false);
-                    await ExponentialBackOff();
-                    
-                    async Task DelayedRequeue()
-                    {
-                        await ExponentialBackOff(2 + item.attempt);
-                        if (cancel.IsCancellationRequested) return;
-                        Queue.Enqueue((item.@event, item.attempt + 1));
-                        logger.LogDebug("Event {Id}/{Attempt} requeued.", id, item.attempt + 1);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Error({ErrorCt}): Event processing failed. Event {Id}/{Attempt} deadlettered (to log):\n{Event}", errorCt, id, item.attempt, item.@event.ToJson());
-                    await ExponentialBackOff();
-                }
-
-                async Task ExponentialBackOff(int? times = null, [CallerMemberName] string method = null, [CallerLineNumber] int? line = null)
-                {
-                    times ??= errorCt++; // use & increment errorCt when not supplied
-                    var delayMs = ((int)Math.Pow(2, times.Value > 7 ? 7 : times.Value)) * 1000; // number->secs : 1->2s, 2->4s, 3->8s, 4->16s, 5->32s, 6->64s, 7->128s
-                    logger.LogDebug("Sleep after error starting for {DelayMs}ms for {Method}:{Line}.", delayMs, method, line);
-                    await Task.Delay(delayMs, cancel);
+                    await ExponentialBackOff(2 + item.Attempt);
+                    if (cancel.IsCancellationRequested) return;
+                    Events.Enqueue((item.Event, item.Subscription, item.Attempt + 1));
+                    logger.LogDebug("Event {Id}/{Attempt} requeued & available for {Subscriber}.", id, item.Attempt + 1, item.Subscription);
                 }
             }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error({ErrorCt}): Event processing failed. Event {Id}/{Attempt} deadlettered (to log) for {Subscription}:\n{Event}", errorCt, id, item.Attempt, item.Subscription, item.Event.ToJson());
+            }
 
-            logger.LogInformation($"EventProcessor background task has finished.");
+            await Task.Delay(500, cancel); // short wait on poller loop
+
+            async Task ExponentialBackOff(int? times = null, [CallerMemberName] string method = null, [CallerLineNumber] int? line = null)
+            {
+                times ??= errorCt++; // use & increment errorCt when not supplied
+                var delayMs = ((int)Math.Pow(2, times.Value > 7 ? 7 : times.Value)) * 1000; // number->secs : 1->2s, 2->4s, 3->8s, 4->16s, 5->32s, 6->64s, 7->128s
+                logger.LogDebug("Sleep after error starting for {DelayMs}ms for {Method}:{Line}.", delayMs, method, line);
+                await Task.Delay(delayMs, cancel);
+            }
         }
 
-        public EventProcessor(IEventGridClient subscriber, ILogger<EventProcessor> logger)
-            => ctor = (subscriber, logger);
-        readonly (IEventGridClient subscriber, ILogger<EventProcessor> logger) ctor;
+        logger.LogInformation($"EventProcessor background task has finished.");
     }
+
+    public EventProcessor(IEventGridClient eventGridClient, IOptions<Services> options, ILogger<EventProcessor> logger)
+        => ctor = (options.Value.KeyByEventType(), eventGridClient, logger);
+    readonly (EventTypeMap eventTypeMap, IEventGridClient eventGridClient, ILogger logger) ctor;
 }

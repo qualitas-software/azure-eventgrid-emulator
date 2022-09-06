@@ -1,35 +1,27 @@
-﻿using Microsoft.Azure.EventGrid.Models;
-using Microsoft.Extensions.Configuration;
-using System;
-using System.Net.Http;
-using System.Threading.Tasks;
+﻿using Azure.Messaging.EventGrid;
 using static System.Text.Encoding;
 
-namespace Qs.EventGrid.Emulator
+namespace Qs.EventGrid.Emulator;
+
+using static Constants;
+
+class EventGridClient : IEventGridClient
 {
-    using static Constants;
-
-    class EventGridClient : IEventGridClient
+    async Task<string> IEventGridClient.SendEventAsync(string baseAddress, Endpoint endpoint, params EventGridEvent[] events)
     {
-        public async Task SendEventAsync(string subscriberFunctionName, params EventGridEvent[] events)
-        {
-            var content = new StringContent(events.ToJson(), UTF8, JsonMediaType);
+        var content = new StringContent(events.ToJson(), UTF8, JsonMediaType);
+        var path = endpoint.EventGridFunction == null ? endpoint.Path : $"{EventGridSubscriber}={endpoint.EventGridFunction}";
+        var httpClient = httpClientFactory.CreateClient(baseAddress);
 
-            var response = await httpClient.PostAsync($@"{webhook}/{eventSubscriber}={subscriberFunctionName}", content);
-            if (!response.IsSuccessStatusCode)
-                throw new Exception($"Invalid http response: {response.StatusCode}");
-        }
+        var response = await httpClient.PostAsync(path, content);
 
-        public EventGridClient(HttpClient httpClient, IConfiguration config)
-        {
-            httpClient.BaseAddress = new Uri($"http://localhost:{Port}/");
-            httpClient.DefaultRequestHeaders.Add("aeg-event-type", "Notification");
-            this.httpClient = httpClient;
-        }
-        readonly HttpClient httpClient;
+        if (!response.IsSuccessStatusCode)
+            throw new Exception($"Invalid http response: {response.StatusCode}");
 
-        const string JsonMediaType = "application/json";
-        const string webhook = @"runtime/webhooks";
-        const string eventSubscriber = @"eventgrid?functionName";
+        return endpoint.EventGridFunction ?? endpoint.Path;
     }
+
+    public EventGridClient(IHttpClientFactory httpClientFactory)
+        => this.httpClientFactory = httpClientFactory;
+    readonly IHttpClientFactory httpClientFactory;
 }
