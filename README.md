@@ -14,51 +14,63 @@ Handles Azure Event Grid Events in a development/localhost context, without requ
 
 ## Overview
 
-To allow one or more Visual Studio 2019 C# solutions to send and/or receive pushed events in a local development context.
+To allow one or more Visual Studio 2022 C# solutions to send and/or receive pushed events in a local development context.
     
-The library Microsoft.Azure.EventGrid requires that events are published as HTTPS, and to a host name.  So the emulator listens for published events on HTTPS, and is addressed with a topic domain hostname of 'local.eventgrid.net', via proxy.  
+The library Microsoft.Azure.EventGrid requires that events are published as HTTPS.  So the emulator listens for published events on HTTPS, and is addressed with a localhost topic domain hostname.  
 
 The emulator must issue a 202 Accepted response once the event is enqueued in the emulator (_ie- it should not wait for push delivery to complete_).  A hosted service will poll the queue, and will distribute these events to the subscriber function(s); the typical scenario is a function app running locally from VS.  
     
-There is a basic delivery retry mechanism for the publishing, if a push endpoint is not accepting the event.
+There is a basic delivery retry mechanism for the publishing per subscriber and per event, if a push endpoint is not accepting a particular event.
 
     
 ## Usage
 
-The emulator listens for events as HTTP requests at: https://localhost:5005/api/events *
+The emulator listens for events as HTTP requests at: https://localhost:5318/api/events *
 
-It is probably best to publish to folder (eg- 'bin\Publish') and run the .exe from a shortcut (to save memory use), but an instance of VS running the app is also possible.
+A self-signed certificate for localhost emulator will work with the later Microsoft publishing libraries.  
 
-Events can be published, from a different VS solution, (using package: Microsoft.Azure.EventGrid 3.2.0) as follows:
+It is probably best to publish the emulator to a folder (eg- 'bin\Publish') and run the .exe from a shortcut (to save memory use); but an instance of VS running the app is also possible.
 
-    var uri = new Uri(options.TopicUri); // set to "https://local.eventgrid.net/api/events" in development
-    var key = options.TopicKey;          // set to Guid.Empty in development
+Events can be published, from a different VS solution, (using package: Azure.Messaging.EventGrid 4.11.0) as follows:
+
+    EventGridPublisherClient client = new(
+        new Uri("<topic-uri>"),                   // set to "https://localhost:5318/api/events" in development
+        new AzureKeyCredential("<topic-key>"));   // set to Guid.Empty in development
     
-    var topic = new EventGridClient(new TopicCredentials(key));
-    var @event = new EventGridEvent(<id>, <subject>, ...  );
-    await topic.PublishEventsAsync(uri.Host, new [] { @event });  
+    await client.SendEventAsync(egEvent); 
+
+<sub>\* - _By default, but can be adjusted in `appsettings.json` at `Kestrel.Endpoints.Https.Url`._</sub>
+
+## Push Notification Setup
+
+Events published to the emulator will be pushed by the emulator to EventGridTrigger functions, WebHook/Http functions, or any accessible endpoint as defined in the `appsettings.json` file under `Services` as follows:
     
-Events will be pushed to an Azure Function or a webhook running on localhost port 7075* as follows:
+    {
+        "Kestrel": ..
+        "Logging": ..
+        "Services: [
+            { <Service> }, .. , { <Service> }
+        ]
+    }
 
-    http://localhost:7075/runtime/webhooks/eventGrid?functionName={subscriberFunctionName}
+The structure of a Service is as follows:
 
-Amend the filtering logic in EventProcessor.cs, which currently filters based on three supported EventTypes.
+    {
+        "BaseAddress": "<domain address, eg: http://localhost:7075>",
+        "Endpoints" : [
+            { <Endpoint> }, .. , { <Endpoint> }
+        ]
+    }
 
-<sub>\* - _By default, but can be adjusted in code._</sub>
+The structure of an Endpoint is as follows:
 
+    {
+        "Path": "<eg: api/my-handler>",   // supply a value for either Path or EventGridFunction
+        "EventGridFunction": "<EventGridTrigger Function name, eg: MyAegSubsciptionHandler>",
+        "EventTypes": [ "EventType1", .. , "EventTypeN" ]
+    }
 
-## Setup Proxy & DNS Host Mapping
-
-In an elevated context, add the following entry to the `C:\Windows\System32\drivers\etc\hosts` file:
-
-    127.0.0.183 local.eventgrid.net
-
-In an elevated Command prompt, call the following command:
-
-    netsh interface portproxy add v4tov4 listenport=443 listenaddress=127.0.0.183 connectport=5005 connectaddress=127.0.0.1
-
-Install `certificate.pfx` from the Emulators project folder, with password "123", to: Current User\Trusted Root Certification Authorities.
-
+An event type can be subscribed to by more than one Endpoint or Service.
 
 ## Sample Azure Functions Endpoint
 
@@ -72,14 +84,14 @@ Setup your C# endpoint function using EventGridTriggerAttribute as follows:
 
     public class EventHandlerFunctions
     {
-        [FunctionName(nameof(CreateEventHandler))]
-        public async Task CreateEventHandler([EventGridTrigger] EventGridEvent @event, ... )
+        [FunctionName(nameof(MyAegSubsciptionHandler))]
+        public async Task MyAegSubsciptionHandler([EventGridTrigger] EventGridEvent @event, ... )
         {
             ...
         }
     }
 
-<sub>_Azure Function EventGrid trigger code above built using package: Microsoft.Azure.WebJobs.Extensions.EventGrid 2.1.0_</sub>
+<sub>_Azure Function EventGrid trigger code above built using package: Microsoft.Azure.WebJobs.Extensions.EventGrid 3.2.0_</sub>
 
     
 
