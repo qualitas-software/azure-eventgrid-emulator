@@ -11,31 +11,32 @@ class EventProcessor : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken cancel)
     {
         var (eventTypeMap, eventGridClient, logger) = ctor;
-        logger.LogDebug($"EventProcessor is starting.");
-        cancel.Register(() => logger.LogDebug($"EventProcessor background task is stopping."));
-        var dequeueErrCt = 0;
+        logger.LogDebug("EventProcessor is starting for {EventTypes} event types.", eventTypeMap.Count);
+        cancel.Register(() => logger.LogInformation($"EventProcessor background task is stopping."));
+        int dequeueErrorCt = 0, dequeueEmptyCt = 0;
 
         while (!cancel.IsCancellationRequested)
         {
             (EventGridEvent @event, Subscription subscription, int attempt, string id, string type) = (null, null, -1, null, null);
 
-            if (dequeueErrCt > 0) logger.LogTrace("Looking for events (ErrorCt:{ErrorCt})", dequeueErrCt);
-
             try
             {
+                logger.LogTrace("Checking for events {{EmptyCt:{EmptyCt},{ErrorCt}}}", ++dequeueErrorCt);
+
                 if (!Events.TryDequeue(out var item))
                 {
-                    dequeueErrCt = 0;
-                    await Task.Delay(1000, cancel);
+                    dequeueErrorCt = 0;
+                    await Task.Delay(CalcExponentialBackOffMs(++dequeueEmptyCt, 2, 20), cancel);
                     continue;
                 }
+
                 (@event, subscription, attempt) = item;
-                (dequeueErrCt, id, type) = (0, @event.Id, @event.EventType);
+                (dequeueEmptyCt, dequeueErrorCt, id, type) = (0, 0, @event.Id, @event.EventType);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error({ErrorCt}): Failed to dequeue event.", ++dequeueErrCt);
-                await Task.Delay(dequeueErrCt * 5000, cancel);
+                logger.LogError(ex, "Error({ErrorCt}): Failed to dequeue event. Polling will backoff.", ++dequeueErrorCt);
+                await Task.Delay(CalcExponentialBackOffMs(dequeueErrorCt), cancel);
                 continue;
             }
 
@@ -69,14 +70,17 @@ class EventProcessor : BackgroundService
                 logger.LogError(ex, "Error: Event processing failed. Event {Id}/{Attempt} deadlettered (to log) for {Subscription}:\n{Event}", id, attempt, subscription, @event.ToJson());
             }
 
-            await Task.Delay(500, cancel); // short wait on poller loop
+            await Task.Delay(10, cancel); // short wait on completion of poller loop
 
             async Task ExponentialBackOff(int times, string eventId, [CallerMemberName] string method = null, [CallerLineNumber] int? line = null)
             {
-                var delayMs = Math.Clamp((int)Math.Pow(4, times), 1, 30 * 60) * 1000; // number->secs : 1->4s, 2->16s, 3->64s, 4->4m16s, 5->17m4s, 6+->30m
+                var delayMs = CalcExponentialBackOffMs(times);
                 logger.LogDebug("ExponentialBackOff:{Times} of {Delay} for event {EventId} ({Method}:{Line}).", times, TimeSpan.FromMilliseconds(delayMs), eventId, method, line);
                 await Task.Delay(delayMs, cancel);
             }
+
+            static int CalcExponentialBackOffMs(int exponent, int baseSecs = 4, int maxSecs = 3 * 60)
+                => Math.Clamp((int)Math.Pow(baseSecs, exponent), 1, maxSecs) * 1000; // 1=>4s, 2=>16s, 3=>64s, 4=>4m16s, 5=>17m4s, 6+=>30m
         }
 
         logger.LogInformation($"EventProcessor background task has finished.");
