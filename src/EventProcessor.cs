@@ -13,71 +13,68 @@ class EventProcessor : BackgroundService
         var (eventTypeMap, eventGridClient, logger) = ctor;
         logger.LogDebug($"EventProcessor is starting.");
         cancel.Register(() => logger.LogDebug($"EventProcessor background task is stopping."));
-        var errorCt = 0;
+        var dequeueErrCt = 0;
 
         while (!cancel.IsCancellationRequested)
         {
-            (EventGridEvent @Event, Subscription Subscription, int Attempt) item = (null, null, -1);
-            string id = null, type = null;
+            (EventGridEvent @event, Subscription subscription, int attempt, string id, string type) = (null, null, -1, null, null);
 
-            logger.LogTrace("Looking for events ({Errors})", errorCt);
+            if (dequeueErrCt > 0) logger.LogTrace("Looking for events (ErrorCt:{ErrorCt})", dequeueErrCt);
 
             try
             {
-                if (!Events.TryDequeue(out item))
+                if (!Events.TryDequeue(out var item))
                 {
-                    await Task.Delay(500, cancel);
+                    dequeueErrCt = 0;
+                    await Task.Delay(1000, cancel);
                     continue;
                 }
-                (id, type) = (item.Event.Id, item.Event.EventType);
+                (@event, subscription, attempt) = item;
+                (dequeueErrCt, id, type) = (0, @event.Id, @event.EventType);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error({ErrorCt}): Failed to dequeue event.", errorCt);
-                await ExponentialBackOff();
+                logger.LogError(ex, "Error({ErrorCt}): Failed to dequeue event.", ++dequeueErrCt);
+                await Task.Delay(dequeueErrCt * 5000, cancel);
                 continue;
             }
 
             try
             {
-                // Get correct client & push the event to the correct endpoint (eg- WebHook or Azure Function)
-                var endpoint = await eventGridClient.SendEventAsync(item.Subscription.Service.BaseAddress, item.Subscription.Endpoint, item.Event);
-
-                logger.LogInformation("Event pushed {Id}/{Attempt} {EventType} {Subject} to {Subscription}", id, item.Attempt, type, item.Event.Subject, item.Subscription);
-                errorCt = 0;
+                var endpoint = await eventGridClient.SendEventAsync(subscription.Service.BaseAddress, subscription.Endpoint, @event);
+                logger.LogInformation("Event pushed {Id}/{Attempt} {EventType} {Subject} to {Subscription}", id, attempt, type, @event.Subject, subscription);
             }
             catch (HttpRequestException ex)
             {
-                if (item.Attempt >= 5)
+                if (attempt >= 7)
                 {
                     //todo: use a DLQ (short TTL, eg- 24h)? eg- az storage emulator
-                    logger.LogWarning("Error({ErrorCt}): {Error}. Event {Id}/{Attempt} deadlettered (to log) for {Subscription} :\n{Event}", errorCt, ex.Message, id, item.Attempt, item.Subscription, item.Event.ToJson());
+                    logger.LogWarning("Error: {Error}. Event {Id}/{Attempt} deadlettered (to log) for {Subscription} :\n{Event}", ex.Message, id, attempt, subscription, @event.ToJson());
                     continue;
                 }
 
-                logger.LogInformation("Error({ErrorCt}): {Error}. Event delivery for {Id}/{Attempt} will be reattempted for {Subscription}.", errorCt, ex.Message, id, item.Attempt, item.Subscription);
+                logger.LogInformation("Error: {Error}. Event delivery for {Id}/{Attempt} will be reattempted for {Subscription}.", ex.Message, id, attempt, subscription);
                 var _ = Task.Run(DelayedRequeue, cancel).ConfigureAwait(false); // run on thread pool
 
                 async Task DelayedRequeue()
                 {
-                    await ExponentialBackOff(2 + item.Attempt);
+                    await ExponentialBackOff(attempt, id);
                     if (cancel.IsCancellationRequested) return;
-                    Events.Enqueue((item.Event, item.Subscription, item.Attempt + 1));
-                    logger.LogDebug("Event {Id}/{Attempt} requeued & available for {Subscriber}.", id, item.Attempt + 1, item.Subscription);
+                    Events.Enqueue((@event, subscription, attempt + 1));
+                    logger.LogDebug("Event {Id}/{Attempt} requeued & available for {Subscriber}.", id, attempt + 1, subscription);
                 }
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error({ErrorCt}): Event processing failed. Event {Id}/{Attempt} deadlettered (to log) for {Subscription}:\n{Event}", errorCt, id, item.Attempt, item.Subscription, item.Event.ToJson());
+                logger.LogError(ex, "Error: Event processing failed. Event {Id}/{Attempt} deadlettered (to log) for {Subscription}:\n{Event}", id, attempt, subscription, @event.ToJson());
             }
 
             await Task.Delay(500, cancel); // short wait on poller loop
 
-            async Task ExponentialBackOff(int? times = null, [CallerMemberName] string method = null, [CallerLineNumber] int? line = null)
+            async Task ExponentialBackOff(int times, string eventId, [CallerMemberName] string method = null, [CallerLineNumber] int? line = null)
             {
-                times ??= errorCt++; // use & increment errorCt when not supplied
-                var delayMs = ((int)Math.Pow(2, times.Value > 7 ? 7 : times.Value)) * 1000; // number->secs : 1->2s, 2->4s, 3->8s, 4->16s, 5->32s, 6->64s, 7->128s
-                logger.LogDebug("Sleep after error starting for {DelayMs}ms for {Method}:{Line}.", delayMs, method, line);
+                var delayMs = Math.Clamp((int)Math.Pow(4, times), 1, 30 * 60) * 1000; // number->secs : 1->4s, 2->16s, 3->64s, 4->4m16s, 5->17m4s, 6+->30m
+                logger.LogDebug("ExponentialBackOff:{Times} of {Delay} for event {EventId} ({Method}:{Line}).", times, TimeSpan.FromMilliseconds(delayMs), eventId, method, line);
                 await Task.Delay(delayMs, cancel);
             }
         }
