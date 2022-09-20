@@ -26,7 +26,7 @@ class EventReceiver
                 {
                     if (!eventTypeMap.TryGetValue(@event.EventType, out var subscriptions))
                     {
-                        logger.LogError("Error: No subscribers setup for {EventType} event type.  Event {Id} dropped.", @event.EventType, @event.Id);
+                        logger.LogError("Error: No subscribers setup for {EventType} event type.  Event dropped: {Event}.", @event.EventType, @event.ToJson(true));
                         continue;
                     }
 
