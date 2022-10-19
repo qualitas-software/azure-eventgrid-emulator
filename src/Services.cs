@@ -36,7 +36,6 @@ internal record Subscription(Endpoint Endpoint, Service Service)
     public override string ToString()
         => $"{Service.BaseAddress.EnsureTrailing()}{Endpoint.EventGridFunction?.Prepend("EventGridFunc:") ?? Endpoint.Path}";
 
-
     public static implicit operator Subscription((Service, Endpoint) entity)
         => (entity);
 }

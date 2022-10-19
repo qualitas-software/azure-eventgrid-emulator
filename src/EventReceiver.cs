@@ -11,7 +11,7 @@ class EventReceiver
 {
     public async Task ReceiveAsync(HttpContext context)
     {
-        var (eventTypeMap, logger) = ctor;
+        var (eventTypeMap, storageClient, logger) = ctor;
         context.Response.Headers.Add("App", Namespace);
 
         try
@@ -27,8 +27,11 @@ class EventReceiver
                     if (!eventTypeMap.TryGetValue(@event.EventType, out var subscriptions))
                     {
                         logger.LogError("Error: No subscribers setup for {EventType} event type.  Event dropped: {Event}.", @event.EventType, @event.ToJson(true));
+                        await storageClient.EnqueueReceivedEventAsync(@event);
                         continue;
                     }
+
+                    await storageClient.EnqueueReceivedEventAsync(@event, subscriptions);
 
                     foreach (var subscription in subscriptions)
                     {
@@ -52,7 +55,7 @@ class EventReceiver
         }
     }
 
-    public EventReceiver(IOptions<Services> options, ILogger<EventReceiver> logger)
-        => ctor = (options.Value.KeyByEventType(logger), logger);
-    readonly (EventTypeMap eventTypeMap, ILogger logger) ctor;
+    public EventReceiver(IOptions<Services> options, StorageClient storageClient, ILogger<EventReceiver> logger)
+        => ctor = (options.Value.KeyByEventType(logger), storageClient, logger);
+    readonly (EventTypeMap eventTypeMap, StorageClient storageClient, ILogger logger) ctor;
 }

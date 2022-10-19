@@ -7,6 +7,7 @@ public class Startup
     public void ConfigureServices(IServiceCollection services)
         => services.AddHostedService<EventProcessor>()
                    .AddSingleton<EventReceiver>()
+                   .AddSingleton<StorageClient>()
                    .AddOptions<Services>()
                    .AddEventGridClients(configuration);
 
