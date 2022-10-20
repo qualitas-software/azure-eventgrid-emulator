@@ -18,7 +18,7 @@ To allow one or more Visual Studio 2022 C# solutions to send and/or receive push
     
 The library Microsoft.Azure.EventGrid requires that events are published as HTTPS.  So the emulator listens for published events on HTTPS, and is addressed with a localhost topic domain hostname.  
 
-The emulator must issue a 202 Accepted response once the event is enqueued in the emulator (_ie- it should not wait for push delivery to complete_).  A hosted service will poll the queue, and will distribute these events to the subscriber function(s); the typical scenario is a function app running locally from VS.  
+The emulator must issue a 200-204 status response once the event is enqueued in the emulator (_ie- it should not wait for push delivery to complete_).  A hosted service will poll the queue, and will distribute these events to the subscriber function(s); the typical scenario is a function app running locally from VS.  
     
 There is a basic delivery retry mechanism for the publishing per subscriber and per event, if a push endpoint is not accepting a particular event.
 
@@ -93,7 +93,20 @@ Setup your C# endpoint function using EventGridTriggerAttribute as follows:
 
 <sub>_Azure Function EventGrid trigger code above built using package: Microsoft.Azure.WebJobs.Extensions.EventGrid 3.2.0_</sub>
 
-    
+## Events Received and Deadlettered
 
+If you have Azureite, the Microsoft Storage Account Emulator, installed then this emulator will store every event received by appending it to a queue that it creates called `qs-aeg-emulator-received` under the event element, with other details recorded.   The default TTL of 7 days for messages on the queue is used.
 
+If the emulator cannot deliver a message (eg- no subscribers defined for the event type, the maximum no of attempts have been made, and so on) then the event will also be written to another queue called `qs-aeg-emulator-deadletter` under the event element, with other details recorded.  The same TTL applies here.
 
+To disable the use of the storage emulator, add the following to `appsettings.json`:
+
+    {
+        "Storage": {
+            "Enabled": false
+        }
+    }
+
+## Coming Next
+
+Watch this space for new features, such as a replay queue for events to be easily resubmitted.
