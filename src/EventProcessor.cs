@@ -6,22 +6,22 @@ namespace Qs.EventGrid.Emulator;
 
 class EventProcessor : BackgroundService
 {
-    public static Queue<(EventGridEvent, Subscription, int)> Events = new();
+    public static Queue<(EventGridEvent, Subscription, int, DateTime)> Events = new();
 
     protected override async Task ExecuteAsync(CancellationToken cancel)
     {
-        var (eventTypeMap, eventGridClient, logger) = ctor;
+        var (eventTypeMap, eventGridClient, storageClient, logger) = ctor;
         logger.LogDebug("EventProcessor is starting for {EventTypes} event types.", eventTypeMap.Count);
         cancel.Register(() => logger.LogInformation($"EventProcessor background task is stopping."));
         int dequeueErrorCt = 0, dequeueEmptyCt = 0;
 
         while (!cancel.IsCancellationRequested)
         {
-            (EventGridEvent @event, Subscription subscription, int attempt, string id, string type) = (null, null, -1, null, null);
+            (EventGridEvent @event, Subscription subscription, int attempt, DateTime receivedUtc, string id, string type) = (null, null, -1, default, null, null);
 
             try
             {
-                logger.LogTrace("Checking for events {{EmptyCt:{EmptyCt},{ErrorCt}}}", ++dequeueErrorCt);
+                logger.LogTrace("Checking for events {{EmptyCt:{EmptyCt},{ErrorCt}}}", dequeueEmptyCt, ++dequeueErrorCt);
 
                 if (!Events.TryDequeue(out var item))
                 {
@@ -30,7 +30,7 @@ class EventProcessor : BackgroundService
                     continue;
                 }
 
-                (@event, subscription, attempt) = item;
+                (@event, subscription, attempt, receivedUtc) = item;
                 (dequeueEmptyCt, dequeueErrorCt, id, type) = (0, 0, @event.Id, @event.EventType);
             }
             catch (Exception ex)
@@ -49,8 +49,8 @@ class EventProcessor : BackgroundService
             {
                 if (attempt >= 7)
                 {
-                    //todo: use a DLQ (short TTL, eg- 24h)? eg- az storage emulator
-                    logger.LogWarning("Error: {Error}. Event {Id}/{Attempt} deadlettered (to log) for {Subscription} :\n{Event}", ex.Message, id, attempt, subscription, @event.ToJson());
+                    var deadletterMsgId = await storageClient.EnqueueDeadletteredEventAsync(@event, $"Too many attempts. {ex.Message}", subscription, attempt, receivedUtc, logger);
+                    logger.LogWarning("Error: {Error}. Event {Id}/{Attempt} deadlettered as {DeadletterMsgId} for {Subscription} :\n{Event}", ex.Message, id, attempt, deadletterMsgId, subscription, @event.ToJson());
                     continue;
                 }
 
@@ -61,13 +61,14 @@ class EventProcessor : BackgroundService
                 {
                     await ExponentialBackOff(attempt, id);
                     if (cancel.IsCancellationRequested) return;
-                    Events.Enqueue((@event, subscription, attempt + 1));
-                    logger.LogDebug("Event {Id}/{Attempt} requeued & available for {Subscriber}.", id, attempt + 1, subscription);
+                    Events.Enqueue((@event, subscription, attempt + 1, receivedUtc));
+                    logger.LogDebug("Event {Id} requeued as attempt {Attempt} after {SinceFirstReceived} & available for {Subscriber}.", id, attempt + 1, (DateTime.UtcNow - receivedUtc).Trim(), subscription);
                 }
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error: Event processing failed. Event {Id}/{Attempt} deadlettered (to log) for {Subscription}:\n{Event}", id, attempt, subscription, @event.ToJson());
+                var deadletterMsgId = await storageClient.EnqueueDeadletteredEventAsync(@event, $"{ex.Message} ({ex.GetType().Name})", subscription, attempt, receivedUtc, logger);
+                logger.LogError(ex, "Error: Event processing failed. Event {Id}/{Attempt} deadlettered as {DeadletterMsgId} for {Subscription}:\n{Event}", id, attempt, deadletterMsgId, subscription, @event.ToJson());
             }
 
             await Task.Delay(10, cancel); // short wait on completion of poller loop
@@ -79,14 +80,14 @@ class EventProcessor : BackgroundService
                 await Task.Delay(delayMs, cancel);
             }
 
-            static int CalcExponentialBackOffMs(int exponent, int baseSecs = 4, int maxSecs = 3 * 60)
+            static int CalcExponentialBackOffMs(int exponent, int baseSecs = 4, int maxSecs = 10 * 60)
                 => Math.Clamp((int)Math.Pow(baseSecs, exponent), 1, maxSecs) * 1000; // 1=>4s, 2=>16s, 3=>64s, 4=>4m16s, 5=>17m4s, 6+=>30m
         }
 
         logger.LogInformation($"EventProcessor background task has finished.");
     }
 
-    public EventProcessor(IEventGridClient eventGridClient, IOptions<Services> options, ILogger<EventProcessor> logger)
-        => ctor = (options.Value.KeyByEventType(), eventGridClient, logger);
-    readonly (EventTypeMap eventTypeMap, IEventGridClient eventGridClient, ILogger logger) ctor;
+    public EventProcessor(IEventGridClient eventGridClient, IOptions<Services> options, StorageClient storageClient, ILogger<EventProcessor> logger)
+        => ctor = (options.Value.KeyByEventType(), eventGridClient, storageClient, logger);
+    readonly (EventTypeMap eventTypeMap, IEventGridClient eventGridClient, StorageClient storageClient, ILogger logger) ctor;
 }

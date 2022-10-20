@@ -20,4 +20,6 @@ public static class Extensions
 
     public static ILogger GetLogger<T>(this IServiceProvider serviceProvider)
         => serviceProvider.GetRequiredService<ILogger<T>>();
+
+    public static TimeSpan Trim(this TimeSpan timeSpan) => TimeSpan.FromSeconds(Math.Floor(timeSpan.TotalSeconds));
 }

@@ -3,39 +3,62 @@ using Azure.Storage.Queues;
 
 namespace Qs.EventGrid.Emulator;
 
-public enum Queues { Received }
+public enum QueueTypes { Received, Deadletter }
 
 public class StorageClient
 {
     internal Task<string> EnqueueReceivedEventAsync(EventGridEvent @event, params Subscription[] subscriptions)
-        => EnqueueMessageAsync(new { @event, subscriptions = subscriptions?.Select(s => $"{s}") }, Queues.Received);
+        => EnqueueMessageAsync(new { @event, subscriptions = subscriptions?.Select(s => $"{s}") }, QueueTypes.Received);
 
-    public async Task<string> EnqueueMessageAsync<T>(T t, Queues queue) where T : class
+    /// <summary>Write <paramref name="event"/> to deadletter queue for <paramref name="subscription"/>.  Suitable for use in <see langword="catch"/> blocks when <paramref name="safeLogger"/> supplied.</summary>
+    /// <param name="safeLogger">If null, any error is thrown.</param>
+    internal async Task<string> EnqueueDeadletteredEventAsync(EventGridEvent @event, string deadletterReason, Subscription subscription, int attempt, DateTime receivedUtc, ILogger safeLogger)
     {
-        var queueClient = GetQueueClient(queue);
+        try
+        {
+            return await EnqueueMessageAsync(new { @event, deadletterReason, subscription = $"{subscription}", attempt, receivedUtc }, QueueTypes.Deadletter);
+        }
+        catch (Exception ex)
+        {
+            if (safeLogger == null) throw;
+            safeLogger.LogWarning(ex, "Unable to deadletter event {EventId}", @event.Id);
+            return null;
+        }
+    }
+
+    public async Task<string> EnqueueMessageAsync<T>(T t, QueueTypes queue) where T : class
+    {
+        var queueClient = queues[queue];
         if (queueClient == null) return null;
 
         var response = await queueClient.SendMessageAsync(t.ToJson(true));
         return response?.Value?.MessageId;
     }
 
-    QueueClient GetQueueClient(Queues queue) => queue switch
-    {
-        Queues.Received => receivedQueue,
-        _ => throw new NotSupportedException($"{queue} not supported.")
-    };
+    const string ConnectionString = "UseDevelopmentStorage=true";
 
-    public StorageClient(ILogger<StorageClient> logger)
+    public StorageClient(IConfiguration config, ILogger<StorageClient> logger)
     {
-        try
+        if (!config.GetValue<bool>("Storage:Enabled")) return;
+
+        var queues = new Dictionary<QueueTypes, QueueClient>();
+
+        foreach (var queueTypeValue in Enum.GetValues<QueueTypes>())
         {
-            receivedQueue = new("UseDevelopmentStorage=true", "qs-aeg-emulator-received");
-            var respose = receivedQueue.CreateIfNotExists();
+            var queueTypeText = Enum.GetName(queueTypeValue);
+            try
+            {
+                var queueName = config[$"Storage:{queueTypeText}Queue"] ?? $"qs-aeg-emulator-{queueTypeText.ToLower()}";
+                var queueClient = new QueueClient(ConnectionString, queueName);
+                var respose = queueClient.CreateIfNotExists();
+                queues.Add(queueTypeValue, queueClient);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Local storage support enabled but unavailable.  (Queue: {Queue})", queueTypeText);
+            }
         }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Local storage support unavailable.");
-        }
+        this.queues = queues;
     }
-    readonly QueueClient receivedQueue;
+    readonly IReadOnlyDictionary<QueueTypes, QueueClient> queues;
 }

@@ -8,4 +8,5 @@ public static class Constants
 
     public const string JsonMediaType = "application/json";
     public const string EventGridSubscriber = @"runtime/webhooks/eventgrid?functionName";
+    public const string EventHeader = "Event-Processed";
 }

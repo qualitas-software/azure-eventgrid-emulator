@@ -26,16 +26,19 @@ class EventReceiver
                 {
                     if (!eventTypeMap.TryGetValue(@event.EventType, out var subscriptions))
                     {
-                        logger.LogError("Error: No subscribers setup for {EventType} event type.  Event dropped: {Event}.", @event.EventType, @event.ToJson(true));
-                        await storageClient.EnqueueReceivedEventAsync(@event);
+                        var deadletterMsgId = await storageClient.EnqueueDeadletteredEventAsync(@event, "No subscribers", null, 0, DateTime.UtcNow, logger);
+                        var recvd = await storageClient.EnqueueReceivedEventAsync(@event);
+                        context.Response.Headers.Append(EventHeader, $"{@event.Id} -> Rcvd: {recvd}, Dl: {deadletterMsgId}");
+                        logger.LogError("Error: No subscribers setup for {EventType} event type.  Event deadlettered as {DeadletterMsgId}: {Event}.", @event.EventType, deadletterMsgId, @event.ToJson(true));
                         continue;
                     }
 
-                    await storageClient.EnqueueReceivedEventAsync(@event, subscriptions);
+                    var recvdMsgId = await storageClient.EnqueueReceivedEventAsync(@event, subscriptions);
+                    context.Response.Headers.Append(EventHeader, $"{@event.Id} -> Rcvd: {recvdMsgId}, Subs: {subscriptions.Length}");
 
                     foreach (var subscription in subscriptions)
                     {
-                        EventProcessor.Events.Enqueue((@event, subscription, 1));
+                        EventProcessor.Events.Enqueue((@event, subscription, 1, DateTime.UtcNow));
                         logger.LogDebug("Event published {Id} {EventType} published for {Subscription}", @event.Id, @event.EventType, subscription);
                     }
                 }
