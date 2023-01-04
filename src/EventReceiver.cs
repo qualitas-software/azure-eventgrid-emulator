@@ -43,7 +43,7 @@ class EventReceiver
                     }
                 }
 
-                context.Response.StatusCode = 204;
+                context.Response.StatusCode = 200;
             }
             catch (Exception ex)
             {
