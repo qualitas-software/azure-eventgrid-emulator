@@ -29,7 +29,7 @@ class EventReceiver
                         var deadletterMsgId = await storageClient.EnqueueDeadletteredEventAsync(@event, "No subscribers", null, 0, DateTime.UtcNow, logger);
                         var recvd = await storageClient.EnqueueReceivedEventAsync(@event);
                         context.Response.Headers.Append(EventHeader, $"{@event.Id} -> Rcvd: {recvd}, Dl: {deadletterMsgId}");
-                        logger.LogError("Error: No subscribers setup for {EventType} event type.  Event deadlettered as {DeadletterMsgId}: {Event}.", @event.EventType, deadletterMsgId, @event.ToJson(true));
+                        logger.LogWarning("Warning: No subscribers setup for {EventType} event type.  Event deadlettered as {DeadletterMsgId}: {Event}.", @event.EventType, deadletterMsgId, @event.ToJson(true));
                         continue;
                     }
 
