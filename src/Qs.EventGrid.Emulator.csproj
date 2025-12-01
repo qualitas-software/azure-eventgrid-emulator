@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <TargetFramework>net6.0</TargetFramework>
+    <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>466103b7-ddf7-4d46-8dc5-e52a05481ae0</UserSecretsId>
     <ApplicationIcon>Qs.EventGrid.Emulator.ico</ApplicationIcon>
