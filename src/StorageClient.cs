@@ -26,16 +26,14 @@ public class StorageClient
         }
     }
 
-    public async Task<string> EnqueueMessageAsync<T>(T t, QueueTypes queue) where T : class
+    public async Task<string> EnqueueMessageAsync<TMessage>(TMessage message, QueueTypes queueType) where TMessage : class
     {
-        var queueClient = queues[queue];
+        var queueClient = queues[queueType];
         if (queueClient == null) return null;
 
-        var response = await queueClient.SendMessageAsync(t.ToJson(true));
+        var response = await queueClient.SendMessageAsync(message.ToJson(true));
         return response?.Value?.MessageId;
     }
-
-    const string ConnectionString = "UseDevelopmentStorage=true";
 
     public StorageClient(IConfiguration config, ILogger<StorageClient> logger)
     {
@@ -49,7 +47,7 @@ public class StorageClient
             try
             {
                 var queueName = config[$"Storage:{queueTypeText}Queue"] ?? $"qs-aeg-emulator-{queueTypeText.ToLower()}";
-                var queueClient = new QueueClient(ConnectionString, queueName);
+                var queueClient = new QueueClient(StorageEmulatorConnectionString, queueName, queueClientOptions);
                 var respose = queueClient.CreateIfNotExists();
                 queues.Add(queueTypeValue, queueClient);
             }
@@ -60,5 +58,8 @@ public class StorageClient
         }
         this.queues = queues;
     }
+
     readonly IReadOnlyDictionary<QueueTypes, QueueClient> queues;
+    readonly QueueClientOptions queueClientOptions = new() { MessageEncoding = QueueMessageEncoding.Base64 };
+    const string StorageEmulatorConnectionString = "UseDevelopmentStorage=true";
 }
